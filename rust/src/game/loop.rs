@@ -1,9 +1,14 @@
 use std::time::{Duration, Instant};
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use tokio::time::sleep;
 use log::{info, debug};
 
 use super::state::SharedGameState;
+use super::sync;
 use crate::ecs::components::*;
+use crate::network::client::ClientConnection;
 
 const TICK_RATE: u64 = 60; // 60 Hz
 const TICK_DURATION_MS: u64 = 1000 / TICK_RATE; // ~16.67ms
@@ -12,11 +17,12 @@ const TICK_DURATION_SEC: f32 = 1.0 / TICK_RATE as f32;
 
 pub struct GameLoop {
     state: SharedGameState,
+    clients: Arc<RwLock<HashMap<u64, ClientConnection>>>,
 }
 
 impl GameLoop {
-    pub fn new(state: SharedGameState) -> Self {
-        Self { state }
+    pub fn new(state: SharedGameState, clients: Arc<RwLock<HashMap<u64, ClientConnection>>>) -> Self {
+        Self { state, clients }
     }
 
     pub async fn run(&self) {
@@ -65,11 +71,19 @@ impl GameLoop {
         // 6. Combat system (future)
         // self.update_combat(&mut state);
 
-        // 7. Generate delta updates (future)
-        // let delta = self.generate_delta(&state);
+        // 7. Generate delta updates
+        // Use raw pointers to split the borrow since we know delta_tracker and world don't overlap
+        let changes = unsafe {
+            let world_ptr = &state.world as *const hecs::World;
+            let tracker_ptr = &mut state.delta_tracker as *mut sync::DeltaTracker;
+            (*tracker_ptr).update(&*world_ptr)
+        };
+        state.delta_sequence = state.delta_sequence.wrapping_add(1);
+        let sequence = state.delta_sequence;
 
-        // 8. Broadcast updates to clients (future)
-        // self.broadcast_delta(delta).await;
+        // 8. Broadcast updates to clients
+        let clients = self.clients.read().await;
+        sync::broadcast_delta(&clients, &state, &changes, sequence).await;
 
         // Debug output every second
         if state.tick_count % 60 == 0 {

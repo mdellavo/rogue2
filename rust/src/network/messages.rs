@@ -1,7 +1,12 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use log::{info, warn, debug};
 use crate::game::state::{SharedGameState, PlayerInput as GamePlayerInput};
+use crate::game::sync;
 use crate::generated::messages_generated::game::network;
 use crate::ecs::components::{Species, CharacterClass};
+use crate::network::client::ClientConnection;
 
 // Type aliases for convenience
 type Message<'a> = network::Message<'a>;
@@ -12,7 +17,12 @@ type Ping<'a> = network::Ping<'a>;
 type ChatMessage<'a> = network::ChatMessage<'a>;
 type InteractDoor<'a> = network::InteractDoor<'a>;
 
-pub async fn handle_message(data: &[u8], client_id: u64, game_state: SharedGameState) {
+pub async fn handle_message(
+    data: &[u8],
+    client_id: u64,
+    game_state: SharedGameState,
+    clients: Arc<RwLock<HashMap<u64, ClientConnection>>>,
+) {
     // Parse the FlatBuffers message
     let message = match flatbuffers::root::<Message>(data) {
         Ok(msg) => msg,
@@ -30,7 +40,7 @@ pub async fn handle_message(data: &[u8], client_id: u64, game_state: SharedGameS
     match msg_type {
         MessageType::PlayerJoin => {
             if let Some(join) = message.payload_as_player_join() {
-                handle_player_join(join, client_id, game_state).await;
+                handle_player_join(join, client_id, game_state, clients).await;
             } else {
                 warn!("Client {} sent PlayerJoin but payload is invalid", client_id);
             }
@@ -109,7 +119,12 @@ async fn handle_interact_door(interact: InteractDoor<'_>, client_id: u64) {
     // TODO: Handle door interaction
 }
 
-async fn handle_player_join(join: PlayerJoin<'_>, client_id: u64, game_state: SharedGameState) {
+async fn handle_player_join(
+    join: PlayerJoin<'_>,
+    client_id: u64,
+    game_state: SharedGameState,
+    clients: Arc<RwLock<HashMap<u64, ClientConnection>>>,
+) {
     let name = join.name().unwrap_or("Unknown").to_string();
     let species_value = join.species();
     let class_value = join.character_class();
@@ -147,8 +162,20 @@ async fn handle_player_join(join: PlayerJoin<'_>, client_id: u64, game_state: Sh
     let spawn_x = 1600.0;
     let spawn_y = 1600.0;
 
-    let mut state = game_state.write().await;
-    state.add_player(client_id, name, species, class, spawn_x, spawn_y);
+    let entity = {
+        let mut state = game_state.write().await;
+        state.add_player(client_id, name, species, class, spawn_x, spawn_y)
+    };
 
     info!("✅ Player {} spawned successfully", client_id);
+
+    // Send GameStateSnapshot to the newly connected client
+    let clients_map = clients.read().await;
+    if let Some(client) = clients_map.get(&client_id) {
+        let state = game_state.read().await;
+        sync::send_snapshot_to_client(client, &state, entity).await;
+        info!("📤 Sent initial snapshot to client {}", client_id);
+    } else {
+        warn!("Client {} not found in clients map after join", client_id);
+    }
 }

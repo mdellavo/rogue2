@@ -11,9 +11,10 @@ A 2D sprite-based multiplayer roguelike game with TypeScript frontend and Rust b
 ## Quick Start
 
 ### Prerequisites
-- Node.js 18+
+- Node.js 20.19+ or 22.12+ (required by Vite 7)
 - Rust 1.75+
 - FlatBuffers compiler (`brew install flatbuffers`)
+- tmux (`brew install tmux`)
 
 ### Setup
 
@@ -23,23 +24,44 @@ A 2D sprite-based multiplayer roguelike game with TypeScript frontend and Rust b
    ./generate.sh
    ```
 
-2. **Start backend:**
+2. **Install frontend dependencies:**
+   ```bash
+   cd web
+   npm install
+   ```
+
+3. **Start both servers (recommended):**
+   ```bash
+   ./run.sh
+   ```
+   This starts both backend and frontend in a split tmux window.
+   - Press `Ctrl+B` then `Up/Down arrow` to switch between panes
+   - Press `Ctrl+B` then `D` to detach (servers keep running)
+   - Run `./stop.sh` to stop all servers
+
+   **OR start servers manually:**
+
+4. **Start backend:**
    ```bash
    cd rust
    cargo run
    ```
 
-3. **Start frontend (in new terminal):**
+5. **Start frontend (in new terminal):**
    ```bash
    cd web
-   npm install
    npm run dev
    ```
 
-4. **Open browser:**
+6. **Open browser:**
    Navigate to `http://localhost:3000`
 
 ## Development
+
+### Quick Commands
+- `./run.sh` - Start both servers in tmux
+- `./stop.sh` - Stop all servers
+- `tmux attach -t rogue2-dev` - Reattach to running session
 
 ### Frontend
 - `npm run dev` - Start dev server

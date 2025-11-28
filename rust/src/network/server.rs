@@ -26,6 +26,10 @@ impl GameServer {
         }
     }
 
+    pub fn get_clients(&self) -> Arc<RwLock<HashMap<u64, ClientConnection>>> {
+        Arc::clone(&self.clients)
+    }
+
     pub async fn start(&self, bind_addr: String) -> anyhow::Result<()> {
         let listener = TcpListener::bind(&bind_addr).await?;
         info!("🌐 WebSocket server listening on: {}", bind_addr);
@@ -109,7 +113,7 @@ async fn handle_connection(
                 Ok(Message::Binary(data)) => {
                     info!("📨 Received {} bytes from client {}", data.len(), client_id);
                     // Parse and handle FlatBuffers message
-                    messages::handle_message(&data, client_id, Arc::clone(&game_state_clone)).await;
+                    messages::handle_message(&data, client_id, Arc::clone(&game_state_clone), Arc::clone(&clients_clone)).await;
                 }
                 Ok(Message::Close(_)) => {
                     info!("🔌 Client {} requested close", client_id);

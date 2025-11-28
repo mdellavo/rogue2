@@ -2,7 +2,6 @@ use hecs::{World, Entity};
 use crate::ecs::components::*;
 use rand::Rng;
 
-const MAX_CHASE_TIME: f32 = 30.0; // 30 seconds before giving up chase
 const FLEE_HP_THRESHOLD: f32 = 0.25; // Flee when below 25% HP
 
 /// Update all monster AI behaviors (simplified version for MVP)

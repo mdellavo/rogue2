@@ -1,7 +1,7 @@
 namespace Game.Network;
 
 // Common types
-struct Vec2 {
+table Vec2 {
   x: float;
   y: float;
 }

@@ -25,9 +25,10 @@ async fn main() -> anyhow::Result<()> {
 
     // Initialize WebSocket server
     let server = network::server::GameServer::new(Arc::clone(&game_state));
+    let clients = server.get_clients();
 
     // Initialize game loop
-    let game_loop = GameLoop::new(Arc::clone(&game_state));
+    let game_loop = GameLoop::new(Arc::clone(&game_state), clients);
 
     info!("✅ Server ready!");
 

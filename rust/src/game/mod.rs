@@ -12,3 +12,4 @@ pub mod weapons;
 pub mod armor;
 pub mod accessories;
 pub mod equipment;
+pub mod sync;

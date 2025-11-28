@@ -4,6 +4,7 @@ use tokio::sync::RwLock;
 use hecs::{World, Entity};
 
 use crate::ecs::components::*;
+use crate::game::sync::DeltaTracker;
 
 fn species_sprite_id(species: Species) -> &'static str {
     match species {
@@ -57,6 +58,8 @@ pub struct GameState {
     pub world: World,
     pub players: HashMap<u64, PlayerState>, // connection_id -> PlayerState
     pub tick_count: u64,
+    pub delta_tracker: DeltaTracker,
+    pub delta_sequence: u32,
 }
 
 impl GameState {
@@ -65,6 +68,8 @@ impl GameState {
             world: World::new(),
             players: HashMap::new(),
             tick_count: 0,
+            delta_tracker: DeltaTracker::new(),
+            delta_sequence: 0,
         }
     }
 
@@ -114,11 +119,16 @@ impl GameState {
             latest_input: PlayerInput::default(),
         });
 
+        // Mark entity as newly spawned for delta tracking
+        self.delta_tracker.mark_spawned(entity);
+
         entity
     }
 
     pub fn remove_player(&mut self, connection_id: u64) {
         if let Some(player_state) = self.players.remove(&connection_id) {
+            // Mark entity as despawned for delta tracking
+            self.delta_tracker.mark_despawned(player_state.entity);
             let _ = self.world.despawn(player_state.entity);
         }
     }

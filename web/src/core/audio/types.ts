@@ -1,4 +1,4 @@
-import { Position } from '../ecs/components';
+import { PositionData } from '../ecs/components';
 
 export interface AudioTrack {
   id: string;
@@ -21,7 +21,7 @@ export interface AudioManifest {
 export interface AudioManager {
   loadManifest(manifest: AudioManifest): Promise<void>;
   playMusic(trackId: string): Promise<void>;
-  playSoundEffect(effectId: string, position?: Position): void;
+  playSoundEffect(effectId: string, position?: PositionData): void;
   crossfadeMusic(newTrackId: string, duration: number): Promise<void>;
   setVolume(type: 'master' | 'music' | 'sfx', volume: number): void;
   mute(): void;
