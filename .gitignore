@@ -1,0 +1,18 @@
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project-specific
+*/node_modules/
+*/dist/
+*/target/
+*/generated/
+*.log
+.env
+.env.local

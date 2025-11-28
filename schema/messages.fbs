@@ -1,0 +1,140 @@
+namespace Game.Network;
+
+// Common types
+struct Vec2 {
+  x: float;
+  y: float;
+}
+
+struct Stats {
+  str: int;
+  dex: int;
+  con: int;
+  int: int;
+  wis: int;
+  cha: int;
+}
+
+// Character species (races)
+enum Species: ubyte {
+  Human = 0,
+  Elf = 1,
+  Dwarf = 2,
+  Halfling = 3,
+  HalfOrc = 4,
+  Gnome = 5
+}
+
+// Character classes
+enum CharacterClass: ubyte {
+  Fighter = 0,
+  Rogue = 1,
+  Cleric = 2,
+  Wizard = 3,
+  Ranger = 4,
+  Barbarian = 5
+}
+
+// Client → Server messages
+table PlayerInput {
+  sequence: uint;
+  timestamp: ulong;
+  movement: Vec2;
+  action: ubyte;  // 0=none, 1=attack, 2=interact
+  target_position: Vec2;
+}
+
+table ChatMessage {
+  message: string;
+}
+
+table InteractDoor {
+  door_entity_id: uint;
+}
+
+table Ping {
+  timestamp: ulong;
+}
+
+table PlayerJoin {
+  name: string;
+  species: Species;
+  character_class: CharacterClass;
+}
+
+// Server → Client messages
+table GameStateSnapshot {
+  map_id: string;
+  map_name: string;
+  background_music: string;
+  ambient_sound: string;
+  player_entity_id: uint;
+  entities: [EntityData];
+  chunks: [ChunkData];
+}
+
+table GameStateDelta {
+  sequence: uint;
+  entities_updated: [EntityData];
+  entities_spawned: [EntityData];
+  entities_despawned: [uint];
+}
+
+table MapTransition {
+  map_id: string;
+  map_name: string;
+  position: Vec2;
+  background_music: string;
+  ambient_sound: string;
+  chunks: [ChunkData];
+}
+
+table EntityData {
+  id: uint;
+  position: Vec2;
+  velocity: Vec2;
+  sprite_id: string;
+  health_current: int;
+  health_max: int;
+  stats: Stats;
+  name: string;
+  species: Species;
+  character_class: CharacterClass;
+  level: uint;
+  experience: uint;
+}
+
+table ChunkData {
+  x: int;
+  y: int;
+  tiles: [uint];  // Flat array of tile IDs
+}
+
+table SystemMessage {
+  message_type: ubyte;  // 0=info, 1=warning, 2=error
+  content: string;
+}
+
+table Pong {
+  timestamp: ulong;
+}
+
+// Message envelope
+union MessageType {
+  PlayerInput,
+  ChatMessage,
+  InteractDoor,
+  Ping,
+  PlayerJoin,
+  GameStateSnapshot,
+  GameStateDelta,
+  MapTransition,
+  SystemMessage,
+  Pong
+}
+
+table Message {
+  payload: MessageType;
+}
+
+root_type Message;

@@ -1,0 +1,154 @@
+use log::{info, warn, debug};
+use crate::game::state::{SharedGameState, PlayerInput as GamePlayerInput};
+use crate::generated::messages_generated::game::network;
+use crate::ecs::components::{Species, CharacterClass};
+
+// Type aliases for convenience
+type Message<'a> = network::Message<'a>;
+type MessageType = network::MessageType;
+type PlayerInput<'a> = network::PlayerInput<'a>;
+type PlayerJoin<'a> = network::PlayerJoin<'a>;
+type Ping<'a> = network::Ping<'a>;
+type ChatMessage<'a> = network::ChatMessage<'a>;
+type InteractDoor<'a> = network::InteractDoor<'a>;
+
+pub async fn handle_message(data: &[u8], client_id: u64, game_state: SharedGameState) {
+    // Parse the FlatBuffers message
+    let message = match flatbuffers::root::<Message>(data) {
+        Ok(msg) => msg,
+        Err(e) => {
+            warn!("Failed to parse message from client {}: {}", client_id, e);
+            return;
+        }
+    };
+
+    // Get the message type
+    let msg_type = message.payload_type();
+    debug!("Client {} sent message type: {:?}", client_id, msg_type);
+
+    // Handle different message types
+    match msg_type {
+        MessageType::PlayerJoin => {
+            if let Some(join) = message.payload_as_player_join() {
+                handle_player_join(join, client_id, game_state).await;
+            } else {
+                warn!("Client {} sent PlayerJoin but payload is invalid", client_id);
+            }
+        }
+        MessageType::PlayerInput => {
+            if let Some(player_input) = message.payload_as_player_input() {
+                handle_player_input(player_input, client_id, game_state).await;
+            } else {
+                warn!("Client {} sent PlayerInput but payload is invalid", client_id);
+            }
+        }
+        MessageType::Ping => {
+            if let Some(ping) = message.payload_as_ping() {
+                handle_ping(ping, client_id).await;
+            }
+        }
+        MessageType::ChatMessage => {
+            if let Some(chat) = message.payload_as_chat_message() {
+                handle_chat_message(chat, client_id).await;
+            }
+        }
+        MessageType::InteractDoor => {
+            if let Some(interact) = message.payload_as_interact_door() {
+                handle_interact_door(interact, client_id).await;
+            }
+        }
+        _ => {
+            warn!("Client {} sent unhandled message type: {:?}", client_id, msg_type);
+        }
+    }
+}
+
+async fn handle_player_input(input: PlayerInput<'_>, client_id: u64, game_state: SharedGameState) {
+    let movement = input.movement();
+    let sequence = input.sequence();
+    let timestamp = input.timestamp();
+    let action = input.action();
+
+    debug!(
+        "Player {} input: seq={}, movement=({:.2}, {:.2}), action={}",
+        client_id,
+        sequence,
+        movement.map(|v| v.x()).unwrap_or(0.0),
+        movement.map(|v| v.y()).unwrap_or(0.0),
+        action
+    );
+
+    // Update player input in game state
+    let game_input = GamePlayerInput {
+        sequence,
+        timestamp,
+        movement_x: movement.map(|v| v.x()).unwrap_or(0.0),
+        movement_y: movement.map(|v| v.y()).unwrap_or(0.0),
+        action,
+    };
+
+    let mut state = game_state.write().await;
+    state.update_player_input(client_id, game_input);
+}
+
+async fn handle_ping(_ping: Ping<'_>, client_id: u64) {
+    debug!("Received ping from client {}", client_id);
+    // TODO: Send Pong response
+}
+
+async fn handle_chat_message(chat: ChatMessage<'_>, client_id: u64) {
+    if let Some(message) = chat.message() {
+        info!("Chat from client {}: {}", client_id, message);
+        // TODO: Broadcast to nearby players
+    }
+}
+
+async fn handle_interact_door(interact: InteractDoor<'_>, client_id: u64) {
+    let door_id = interact.door_entity_id();
+    info!("Client {} interacting with door {}", client_id, door_id);
+    // TODO: Handle door interaction
+}
+
+async fn handle_player_join(join: PlayerJoin<'_>, client_id: u64, game_state: SharedGameState) {
+    let name = join.name().unwrap_or("Unknown").to_string();
+    let species_value = join.species();
+    let class_value = join.character_class();
+
+    // Convert FlatBuffers enums to our ECS enums
+    let species = match species_value {
+        network::Species::Human => Species::Human,
+        network::Species::Elf => Species::Elf,
+        network::Species::Dwarf => Species::Dwarf,
+        network::Species::Halfling => Species::Halfling,
+        network::Species::HalfOrc => Species::HalfOrc,
+        network::Species::Gnome => Species::Gnome,
+        _ => {
+            warn!("Client {} sent invalid species: {:?}", client_id, species_value);
+            return;
+        }
+    };
+
+    let class = match class_value {
+        network::CharacterClass::Fighter => CharacterClass::Fighter,
+        network::CharacterClass::Rogue => CharacterClass::Rogue,
+        network::CharacterClass::Cleric => CharacterClass::Cleric,
+        network::CharacterClass::Wizard => CharacterClass::Wizard,
+        network::CharacterClass::Ranger => CharacterClass::Ranger,
+        network::CharacterClass::Barbarian => CharacterClass::Barbarian,
+        _ => {
+            warn!("Client {} sent invalid class: {:?}", client_id, class_value);
+            return;
+        }
+    };
+
+    info!("Client {} joining as {} {:?} {:?}", client_id, name, species, class);
+
+    // Spawn player at center of map
+    let spawn_x = 1600.0;
+    let spawn_y = 1600.0;
+
+    let mut state = game_state.write().await;
+    state.add_player(client_id, name, species, class, spawn_x, spawn_y);
+
+    info!("✅ Player {} spawned successfully", client_id);
+}

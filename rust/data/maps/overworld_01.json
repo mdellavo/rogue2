@@ -1,0 +1,14 @@
+{
+  "id": "overworld_01",
+  "name": "Overworld - Starting Area",
+  "width": 50,
+  "height": 50,
+  "backgroundMusic": "overworld_theme",
+  "ambientSound": "forest_birds",
+  "tileData": [],
+  "spawnPoints": [
+    { "x": 800, "y": 800 },
+    { "x": 1000, "y": 1000 }
+  ],
+  "objects": []
+}

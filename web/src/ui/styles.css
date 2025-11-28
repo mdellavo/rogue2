@@ -1,0 +1,83 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  background: #1a1a1a;
+  color: #fff;
+  overflow: hidden;
+}
+
+#app {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.connection-screen {
+  text-align: center;
+  padding: 2rem;
+  background: #2a2a2a;
+  border-radius: 8px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+}
+
+.connection-screen h1 {
+  margin-bottom: 1.5rem;
+  font-size: 2rem;
+}
+
+.connection-screen input {
+  width: 300px;
+  padding: 0.75rem;
+  font-size: 1rem;
+  border: 2px solid #444;
+  border-radius: 4px;
+  background: #1a1a1a;
+  color: #fff;
+  margin-bottom: 1rem;
+}
+
+.connection-screen button {
+  padding: 0.75rem 2rem;
+  font-size: 1rem;
+  background: #4a9eff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.connection-screen button:hover {
+  background: #3a8eef;
+}
+
+#status {
+  margin-top: 1rem;
+  min-height: 1.5rem;
+  font-size: 0.9rem;
+}
+
+.status-info {
+  color: #aaa;
+}
+
+.status-success {
+  color: #4ade80;
+}
+
+.status-error {
+  color: #f87171;
+}
+
+.connection-screen button:disabled,
+.connection-screen input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
