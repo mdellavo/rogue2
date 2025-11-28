@@ -93,7 +93,7 @@ impl GameLoop {
 
     fn process_player_inputs(&self, state: &mut super::state::GameState) {
         // Process each player's latest input
-        for (_, player_state) in state.players.iter() {
+        for (client_id, player_state) in state.players.iter() {
             let input = &player_state.latest_input;
 
             // Update velocity based on input
@@ -107,6 +107,11 @@ impl GameLoop {
 
                     velocity.dx = normalized_x * MOVEMENT_SPEED;
                     velocity.dy = normalized_y * MOVEMENT_SPEED;
+
+                    // Debug: Log when applying movement
+                    if state.tick_count % 60 == 0 {
+                        debug!("Player {} velocity set to ({:.2}, {:.2})", client_id, velocity.dx, velocity.dy);
+                    }
                 } else {
                     velocity.dx = 0.0;
                     velocity.dy = 0.0;
