@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use hecs::Entity;
 use flatbuffers::{FlatBufferBuilder, WIPOffset};
-use log::{debug, warn};
+use log::{debug, warn, info};
 
 use crate::ecs::components::*;
 use crate::game::state::GameState;
@@ -168,20 +168,28 @@ pub fn generate_snapshot<'a>(
 
     // Collect all entities within vision range
     let mut entity_infos = Vec::new();
+    let mut total_entities = 0;
     for (entity, position) in game_state.world.query::<&Position>().iter() {
+        total_entities += 1;
         let distance = ((position.x - player_pos.0).powi(2) + (position.y - player_pos.1).powi(2)).sqrt();
         if distance <= VISION_RANGE_PIXELS {
             if let Some(info) = collect_entity_info(&game_state.world, entity) {
+                debug!("  Including entity {:?} at ({}, {}) dist={:.1}", entity, position.x, position.y, distance);
                 entity_infos.push(info);
             }
         }
     }
+    info!("📸 Snapshot: total_entities={}, in_vision={}, player_pos=({}, {})",
+           total_entities, entity_infos.len(), player_pos.0, player_pos.1);
+    for info in &entity_infos {
+        info!("   Entity ID {}: {} at ({}, {})", info.id, info.name, info.pos.0, info.pos.1);
+    }
 
     // PHASE 1: Create all string offsets first
-    let map_id = builder.create_string("overworld_01");
-    let map_name = builder.create_string("Overworld - Starting Area");
-    let background_music = builder.create_string("overworld_theme");
-    let ambient_sound = builder.create_string("forest_birds");
+    let map_id = builder.create_string(&game_state.map.id);
+    let map_name = builder.create_string(&game_state.map.name);
+    let background_music = builder.create_string(&game_state.map.background_music);
+    let ambient_sound = builder.create_string(&game_state.map.ambient_sound);
 
     // Create string offsets for all entities
     let mut entity_string_offsets = Vec::new();
@@ -251,25 +259,89 @@ pub fn generate_snapshot<'a>(
         entity_data_offsets.push(EntityData::create(builder, &entity_data_args));
     }
 
-    // PHASE 3: Create vectors and final snapshot
-    let entities_vector = builder.create_vector(&entity_data_offsets);
-    let chunks_vector = builder.create_vector::<WIPOffset<network::ChunkData>>(&[]);
+    // PHASE 3: Build terrain and feature indexes
+    let terrain_index: Vec<_> = game_state.chunk_system.terrain_index
+        .iter()
+        .map(|t| {
+            let terrain_type = builder.create_string(&t.terrain_type);
+            let sprite_id = builder.create_string(&t.sprite_id);
+            network::TerrainIndex::create(builder, &network::TerrainIndexArgs {
+                id: t.id,
+                terrain_type: Some(terrain_type),
+                walkable: t.walkable,
+                sprite_id: Some(sprite_id),
+            })
+        })
+        .collect();
+    let terrain_index_vec = builder.create_vector(&terrain_index);
 
+    let feature_index: Vec<_> = game_state.chunk_system.feature_index
+        .iter()
+        .map(|f| {
+            let feature_type = builder.create_string(&f.feature_type);
+            let sprite_id = builder.create_string(&f.sprite_id);
+            network::FeatureIndex::create(builder, &network::FeatureIndexArgs {
+                id: f.id,
+                feature_type: Some(feature_type),
+                blocks_movement: f.blocks_movement,
+                sprite_id: Some(sprite_id),
+            })
+        })
+        .collect();
+    let feature_index_vec = builder.create_vector(&feature_index);
+
+    // PHASE 4: Build initial chunks (3x3 around player)
+    let chunk_coords = game_state.chunk_system.get_chunks_for_position(player_pos.0, player_pos.1);
+    let chunk_refs: Vec<_> = chunk_coords
+        .iter()
+        .filter_map(|(cx, cy)| game_state.chunk_system.get_chunk(*cx, *cy))
+        .collect();
+
+    // Build all chunk data using a for loop to avoid borrow checker issues
+    let mut chunk_offsets = Vec::new();
+    for chunk in &chunk_refs {
+        let tiles = builder.create_vector(&chunk.tiles);
+
+        let mut feature_offsets = Vec::new();
+        for f in &chunk.features {
+            feature_offsets.push(network::ChunkFeature::create(builder, &network::ChunkFeatureArgs {
+                tile_x: f.tile_x,
+                tile_y: f.tile_y,
+                feature_id: f.feature_id,
+            }));
+        }
+        let features_vec = builder.create_vector(&feature_offsets);
+
+        let chunk_offset = network::ChunkData::create(builder, &network::ChunkDataArgs {
+            chunk_x: chunk.chunk_x,
+            chunk_y: chunk.chunk_y,
+            tiles: Some(tiles),
+            features: Some(features_vec),
+        });
+        chunk_offsets.push(chunk_offset);
+    }
+
+    // PHASE 5: Create vectors and final snapshot
+    let chunks_vector = builder.create_vector(&chunk_offsets);
+    let entities_vector = builder.create_vector(&entity_data_offsets);
     let player_entity_id = player_entity.to_bits().get() as u32;
 
     let snapshot_args = GameStateSnapshotArgs {
         map_id: Some(map_id),
         map_name: Some(map_name),
+        map_width_chunks: game_state.chunk_system.map_width_chunks,
+        map_height_chunks: game_state.chunk_system.map_height_chunks,
         background_music: Some(background_music),
         ambient_sound: Some(ambient_sound),
         player_entity_id,
         entities: Some(entities_vector),
+        terrain_index: Some(terrain_index_vec),
+        feature_index: Some(feature_index_vec),
         chunks: Some(chunks_vector),
     };
 
     GameStateSnapshot::create(builder, &snapshot_args)
 }
-
 /// Generate a delta update containing only changed entities
 pub fn generate_delta<'a>(
     builder: &'a mut FlatBufferBuilder<'a>,
@@ -457,10 +529,10 @@ fn build_snapshot_message(
         }
     }
 
-    let map_id = builder.create_string("overworld_01");
-    let map_name = builder.create_string("Overworld - Starting Area");
-    let background_music = builder.create_string("overworld_theme");
-    let ambient_sound = builder.create_string("forest_birds");
+    let map_id = builder.create_string(&game_state.map.id);
+    let map_name = builder.create_string(&game_state.map.name);
+    let background_music = builder.create_string(&game_state.map.background_music);
+    let ambient_sound = builder.create_string(&game_state.map.ambient_sound);
 
     let mut entity_string_offsets = Vec::new();
     for info in &entity_infos {
@@ -518,8 +590,69 @@ fn build_snapshot_message(
         ));
     }
 
+    // Build terrain and feature indexes
+    let terrain_index: Vec<_> = game_state.chunk_system.terrain_index
+        .iter()
+        .map(|t| {
+            let terrain_type = builder.create_string(&t.terrain_type);
+            let sprite_id = builder.create_string(&t.sprite_id);
+            network::TerrainIndex::create(&mut builder, &network::TerrainIndexArgs {
+                id: t.id,
+                terrain_type: Some(terrain_type),
+                walkable: t.walkable,
+                sprite_id: Some(sprite_id),
+            })
+        })
+        .collect();
+    let terrain_index_vec = builder.create_vector(&terrain_index);
+
+    let feature_index: Vec<_> = game_state.chunk_system.feature_index
+        .iter()
+        .map(|f| {
+            let feature_type = builder.create_string(&f.feature_type);
+            let sprite_id = builder.create_string(&f.sprite_id);
+            network::FeatureIndex::create(&mut builder, &network::FeatureIndexArgs {
+                id: f.id,
+                feature_type: Some(feature_type),
+                blocks_movement: f.blocks_movement,
+                sprite_id: Some(sprite_id),
+            })
+        })
+        .collect();
+    let feature_index_vec = builder.create_vector(&feature_index);
+
+    // Build initial chunks around player
+    let chunk_coords = game_state.chunk_system.get_chunks_for_position(player_pos.0, player_pos.1);
+    let chunk_refs: Vec<_> = chunk_coords
+        .iter()
+        .filter_map(|(cx, cy)| game_state.chunk_system.get_chunk(*cx, *cy))
+        .collect();
+
+    let mut chunk_offsets = Vec::new();
+    for chunk in &chunk_refs {
+        let tiles = builder.create_vector(&chunk.tiles);
+
+        let mut feature_offsets = Vec::new();
+        for f in &chunk.features {
+            feature_offsets.push(network::ChunkFeature::create(&mut builder, &network::ChunkFeatureArgs {
+                tile_x: f.tile_x,
+                tile_y: f.tile_y,
+                feature_id: f.feature_id,
+            }));
+        }
+        let features_vec = builder.create_vector(&feature_offsets);
+
+        let chunk_offset = network::ChunkData::create(&mut builder, &network::ChunkDataArgs {
+            chunk_x: chunk.chunk_x,
+            chunk_y: chunk.chunk_y,
+            tiles: Some(tiles),
+            features: Some(features_vec),
+        });
+        chunk_offsets.push(chunk_offset);
+    }
+    let chunks_vector = builder.create_vector(&chunk_offsets);
+
     let entities_vector = builder.create_vector(&entity_data_offsets);
-    let chunks_vector = builder.create_vector::<WIPOffset<network::ChunkData>>(&[]);
     let player_entity_id = player_entity.to_bits().get() as u32;
 
     let snapshot = GameStateSnapshot::create(
@@ -527,10 +660,14 @@ fn build_snapshot_message(
         &GameStateSnapshotArgs {
             map_id: Some(map_id),
             map_name: Some(map_name),
+            map_width_chunks: game_state.chunk_system.map_width_chunks,
+            map_height_chunks: game_state.chunk_system.map_height_chunks,
             background_music: Some(background_music),
             ambient_sound: Some(ambient_sound),
             player_entity_id,
             entities: Some(entities_vector),
+            terrain_index: Some(terrain_index_vec),
+            feature_index: Some(feature_index_vec),
             chunks: Some(chunks_vector),
         },
     );

@@ -94,6 +94,13 @@ async fn handle_connection(
 
     info!("✅ Client {} connected ({})", client_id, addr);
 
+    // Log total connected clients
+    {
+        let clients_map = clients.read().await;
+        let state = game_state.read().await;
+        info!("   Total clients: {}, Total players: {}", clients_map.len(), state.players.len());
+    }
+
     // Task to send messages to client
     let send_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
@@ -140,6 +147,7 @@ async fn handle_connection(
         // Remove player from game state
         let mut state = game_state.write().await;
         state.remove_player(client_id);
+        info!("   Remaining clients: {}, Remaining players: {}", clients_map.len(), state.players.len());
     });
 
     // Wait for either task to complete

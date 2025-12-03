@@ -62,14 +62,54 @@ table PlayerJoin {
   character_class: CharacterClass;
 }
 
+// Terrain/Feature index for efficient chunk transmission
+table TerrainIndex {
+  id: uint;
+  terrain_type: string;
+  walkable: bool;
+  sprite_id: string;
+}
+
+table FeatureIndex {
+  id: uint;
+  feature_type: string;
+  blocks_movement: bool;
+  sprite_id: string;
+}
+
+// Feature within a chunk
+table ChunkFeature {
+  tile_x: ubyte;
+  tile_y: ubyte;
+  feature_id: uint;
+}
+
+// Compact chunk data
+table ChunkData {
+  chunk_x: int;
+  chunk_y: int;
+  tiles: [uint];
+  features: [ChunkFeature];
+}
+
+// Chunk coordinate
+table ChunkCoord {
+  x: int;
+  y: int;
+}
+
 // Server → Client messages
 table GameStateSnapshot {
   map_id: string;
   map_name: string;
+  map_width_chunks: uint;
+  map_height_chunks: uint;
   background_music: string;
   ambient_sound: string;
   player_entity_id: uint;
   entities: [EntityData];
+  terrain_index: [TerrainIndex];
+  feature_index: [FeatureIndex];
   chunks: [ChunkData];
 }
 
@@ -104,10 +144,19 @@ table EntityData {
   experience: uint;
 }
 
-table ChunkData {
-  x: int;
-  y: int;
-  tiles: [uint];  // Flat array of tile IDs
+// Client requests specific chunks
+table RequestChunks {
+  chunk_coords: [ChunkCoord];
+}
+
+// Server sends new chunks
+table ChunksLoaded {
+  chunks: [ChunkData];
+}
+
+// Server notifies chunks can be unloaded
+table ChunksUnloaded {
+  chunk_coords: [ChunkCoord];
 }
 
 table SystemMessage {
@@ -130,7 +179,10 @@ union MessageType {
   GameStateDelta,
   MapTransition,
   SystemMessage,
-  Pong
+  Pong,
+  RequestChunks,
+  ChunksLoaded,
+  ChunksUnloaded
 }
 
 table Message {

@@ -66,8 +66,16 @@ export class GameWorld {
     for (let i = 0; i < delta.entitiesSpawnedLength(); i++) {
       const entityData = delta.entitiesSpawned(i);
       if (entityData) {
-        console.log(`✨ Spawning entity ${entityData.id()} (${entityData.name()})`);
-        this.addEntityFromData(entityData);
+        const serverId = entityData.id();
+
+        // Check if entity already exists (can happen if entity was in initial snapshot)
+        if (this.serverToClient.has(serverId)) {
+          console.log(`⚠️ Entity ${serverId} already exists, treating as update instead`);
+          this.updateEntityFromData(entityData);
+        } else {
+          console.log(`✨ Spawning entity ${serverId} (${entityData.name()})`);
+          this.addEntityFromData(entityData);
+        }
       }
     }
 

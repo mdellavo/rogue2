@@ -6,6 +6,7 @@ import { createPlayerJoinMessage } from './core/network/messages';
 import { GameWorld } from './core/ecs/world';
 import { Camera, Renderer, RenderSystem } from './core/rendering';
 import { InputManager, InputSystem } from './core/input';
+import { ChunkManager } from './core/map/ChunkManager';
 import * as FBSpecies from '@generated/game/network/species';
 import * as FBCharacterClass from '@generated/game/network/character-class';
 import type * as FBGameStateSnapshot from '@generated/game/network/game-state-snapshot';
@@ -13,6 +14,8 @@ import type * as FBGameStateDelta from '@generated/game/network/game-state-delta
 import type * as FBMapTransition from '@generated/game/network/map-transition';
 import type * as FBSystemMessage from '@generated/game/network/system-message';
 import type * as FBPong from '@generated/game/network/pong';
+import type * as FBChunksLoaded from '@generated/game/network/chunks-loaded';
+import type * as FBChunksUnloaded from '@generated/game/network/chunks-unloaded';
 
 console.log('🎮 Game client starting...');
 console.log(`WebSocket URL: ${config.wsUrl}`);
@@ -77,6 +80,7 @@ const canvas = document.querySelector<HTMLCanvasElement>('#game-canvas')!;
 
 // Create game world and WebSocket client
 const gameWorld = new GameWorld();
+const chunkManager = new ChunkManager();
 let wsClient: WebSocketClient | null = null;
 let messageHandler: MessageHandler | null = null;
 let playerEntityId: number | null = null;
@@ -110,12 +114,41 @@ function handleGameStateSnapshot(snapshot: FBGameStateSnapshot.GameStateSnapshot
   // Store player entity ID
   playerEntityId = snapshot.playerEntityId();
 
+  // Initialize chunk system with indexes
+  const terrainIndex: any[] = [];
+  for (let i = 0; i < snapshot.terrainIndexLength(); i++) {
+    const terrain = snapshot.terrainIndex(i);
+    if (terrain) terrainIndex.push(terrain);
+  }
+
+  const featureIndex: any[] = [];
+  for (let i = 0; i < snapshot.featureIndexLength(); i++) {
+    const feature = snapshot.featureIndex(i);
+    if (feature) featureIndex.push(feature);
+  }
+
+  chunkManager.setIndexes(
+    terrainIndex,
+    featureIndex,
+    snapshot.mapWidthChunks(),
+    snapshot.mapHeightChunks()
+  );
+
+  // Load initial chunks
+  const chunks: any[] = [];
+  for (let i = 0; i < snapshot.chunksLength(); i++) {
+    const chunk = snapshot.chunks(i);
+    if (chunk) chunks.push(chunk);
+  }
+  chunkManager.loadChunks(chunks);
+
   // Display game info
   gameInfoDiv.innerHTML = `
     <div class="info-panel">
       <h3>${snapshot.mapName()}</h3>
       <p>Player Entity ID: ${playerEntityId}</p>
       <p>Entities in view: ${snapshot.entitiesLength()}</p>
+      <p>Chunks loaded: ${chunks.length}</p>
       <p>Music: ${snapshot.backgroundMusic()}</p>
       <p>Ambient: ${snapshot.ambientSound()}</p>
     </div>
@@ -215,6 +248,28 @@ function handlePong(_pong: FBPong.Pong): void {
   // Pong received, connection is alive
 }
 
+// Handle ChunksLoaded
+function handleChunksLoaded(chunksLoaded: FBChunksLoaded.ChunksLoaded): void {
+  const chunks: any[] = [];
+  for (let i = 0; i < chunksLoaded.chunksLength(); i++) {
+    const chunk = chunksLoaded.chunks(i);
+    if (chunk) chunks.push(chunk);
+  }
+  chunkManager.loadChunks(chunks);
+}
+
+// Handle ChunksUnloaded
+function handleChunksUnloaded(chunksUnloaded: FBChunksUnloaded.ChunksUnloaded): void {
+  const coords: Array<{ x: number; y: number }> = [];
+  for (let i = 0; i < chunksUnloaded.chunkCoordsLength(); i++) {
+    const coord = chunksUnloaded.chunkCoords(i);
+    if (coord) {
+      coords.push({ x: coord.x(), y: coord.y() });
+    }
+  }
+  chunkManager.unloadChunks(coords);
+}
+
 // Game loop
 let lastFrameTime = performance.now();
 
@@ -284,6 +339,8 @@ connectBtn.addEventListener('click', () => {
     onMapTransition: handleMapTransition,
     onSystemMessage: handleSystemMessage,
     onPong: handlePong,
+    onChunksLoaded: handleChunksLoaded,
+    onChunksUnloaded: handleChunksUnloaded,
   });
 
   // Create WebSocket client

@@ -1,10 +1,12 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use hecs::{World, Entity};
 
 use crate::ecs::components::*;
 use crate::game::sync::DeltaTracker;
+use crate::map::types::MapData;
+use crate::map::chunks::{ChunkSystem, calculate_chunk_update, ChunkUpdate};
 
 fn species_sprite_id(species: Species) -> &'static str {
     match species {
@@ -52,6 +54,7 @@ impl Default for PlayerInput {
 pub struct PlayerState {
     pub entity: Entity,
     pub latest_input: PlayerInput,
+    pub loaded_chunks: HashSet<(i32, i32)>, // Chunks currently loaded for this player
 }
 
 pub struct GameState {
@@ -60,17 +63,41 @@ pub struct GameState {
     pub tick_count: u64,
     pub delta_tracker: DeltaTracker,
     pub delta_sequence: u32,
+    pub map: MapData,
+    pub chunk_system: ChunkSystem, // Chunk system for efficient map streaming
+    pub next_spawn_index: usize, // Round-robin spawn point selection
 }
 
 impl GameState {
-    pub fn new() -> Self {
+    pub fn new(map: MapData) -> Self {
+        let chunk_system = ChunkSystem::from_map_data(&map);
+
         Self {
             world: World::new(),
             players: HashMap::new(),
             tick_count: 0,
             delta_tracker: DeltaTracker::new(),
             delta_sequence: 0,
+            map,
+            chunk_system,
+            next_spawn_index: 0,
         }
+    }
+
+    /// Get the next spawn point in round-robin fashion
+    pub fn get_next_spawn_point(&mut self) -> (f32, f32) {
+        if self.map.spawn_points.is_empty() {
+            // Fallback to center if no spawn points defined
+            return (1600.0, 1600.0);
+        }
+
+        let spawn_point = &self.map.spawn_points[self.next_spawn_index];
+        let position = (spawn_point.x, spawn_point.y);
+
+        // Move to next spawn point for next player
+        self.next_spawn_index = (self.next_spawn_index + 1) % self.map.spawn_points.len();
+
+        position
     }
 
     pub fn add_player(
@@ -117,6 +144,7 @@ impl GameState {
         self.players.insert(connection_id, PlayerState {
             entity,
             latest_input: PlayerInput::default(),
+            loaded_chunks: HashSet::new(), // Start with no chunks loaded
         });
 
         // Mark entity as newly spawned for delta tracking
@@ -141,6 +169,34 @@ impl GameState {
 
     pub fn get_player_entity(&self, connection_id: u64) -> Option<Entity> {
         self.players.get(&connection_id).map(|ps| ps.entity)
+    }
+
+    /// Check if chunks need updating for a player and return what changed
+    pub fn update_player_chunks(&mut self, connection_id: u64) -> ChunkUpdate {
+        let player_state = match self.players.get(&connection_id) {
+            Some(state) => state,
+            None => return ChunkUpdate::default(),
+        };
+
+        // Get player position
+        let position = match self.world.get::<&Position>(player_state.entity) {
+            Ok(pos) => (pos.x, pos.y),
+            Err(_) => return ChunkUpdate::default(),
+        };
+
+        // Get chunks needed for this position
+        let needed_chunks = self.chunk_system.get_chunks_for_position(position.0, position.1);
+        let needed_set: HashSet<_> = needed_chunks.into_iter().collect();
+
+        // Calculate chunks to load and unload
+        let player_state = self.players.get(&connection_id).unwrap();
+        let update = calculate_chunk_update(&player_state.loaded_chunks, &needed_set);
+
+        // Update loaded chunks
+        let player_state = self.players.get_mut(&connection_id).unwrap();
+        player_state.loaded_chunks = needed_set;
+
+        update
     }
 }
 

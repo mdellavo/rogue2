@@ -1,0 +1,4 @@
+image: tiles.png
+tileSize: 64
+gridWidth: 128
+gridHeight: 32

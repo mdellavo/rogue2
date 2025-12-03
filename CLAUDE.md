@@ -68,10 +68,12 @@ Both frontend and backend use Entity-Component-System:
 - Melee cooldown: 1 second
 
 ### 6. **Map System**
-- Chunk-based loading (32x32 tiles per chunk)
-- 3x3 chunk grid around player (9 chunks loaded)
-- Maps can be static (JSON) or procedurally generated (seeded)
+- Static maps: Loaded from JSON files
+- Procedural maps: Multi-octave Perlin noise with 9 biomes
+- Configurable via environment variables (USE_PROCEDURAL_MAP, PROCEDURAL_SEED)
+- Full map loaded at startup (chunk-based loading planned for Phase 2)
 - Each map has background music and optional ambient sound
+- Deterministic generation: same seed = same map
 
 ## Project Structure
 
@@ -101,7 +103,13 @@ rogue2/
     │   ├── ecs/              # Components, systems
     │   ├── network/          # WebSocket server, client handling
     │   ├── game/             # Game loop, state, combat
-    │   ├── map/              # Map loading, chunk system
+    │   ├── map/              # Map loading and generation
+    │   │   ├── types.rs      # MapData, SpawnPoint, MapObject
+    │   │   ├── loader.rs     # Load JSON or generate procedurally
+    │   │   ├── generator.rs  # Procedural generation orchestrator
+    │   │   ├── noise.rs      # Multi-octave Perlin noise
+    │   │   ├── biome.rs      # Biome types and rules
+    │   │   └── features.rs   # Feature placement (trees, rocks)
     │   ├── ai/               # NPC AI (hostile, friendly)
     │   ├── config.rs         # Configuration from env vars
     │   └── main.rs           # Entry point
@@ -201,7 +209,8 @@ loadedChunks: 3x3      // 9 chunks around player
 - WebSocket connection and messaging (FlatBuffers)
 - Player connection, join, and disconnect
 - Smooth continuous movement (WASD controls)
-- Single static map (loaded from JSON)
+- Static maps (loaded from JSON) OR procedural maps (Perlin noise)
+- Vision/fog of war system (20 tile radius)
 - WebGL rendering with sprites
 - Basic melee combat with cooldowns
 - D&D-inspired stats and damage calculation
@@ -211,8 +220,8 @@ loadedChunks: 3x3      // 9 chunks around player
 - Server-authoritative state with client prediction
 
 ### ❌ Out of Scope (Future Phases)
-- Chunk loading (use small single map for now)
-- Procedural generation (static map only)
+- Chunk-based loading (full map loaded at startup)
+- Advanced procedural features (rivers, roads, structures)
 - Map transitions / doors
 - Equipment system (basic weapon only)
 - Proximity chat (text chat only)
@@ -241,9 +250,25 @@ cd rust && cargo test
 ```
 
 ### Add a New Map
+
+**Static Map:**
 1. Create JSON file in `rust/data/maps/`
-2. Follow structure in `prompts/setup.md` (lines 765-777)
+2. Follow structure in `prompts/setup.md`
 3. Include: id, name, width, height, backgroundMusic, ambientSound, tileData, spawnPoints
+
+**Procedural Map:**
+```bash
+# Generate with specific seed
+USE_PROCEDURAL_MAP=true PROCEDURAL_SEED=42 cargo run
+
+# Generate with random seed
+USE_PROCEDURAL_MAP=true cargo run
+
+# Generate larger map
+USE_PROCEDURAL_MAP=true PROCEDURAL_WIDTH=256 PROCEDURAL_HEIGHT=256 cargo run
+```
+
+See `PROCEDURAL_GENERATION.md` for full documentation.
 
 ### Debug Networking
 - Check browser DevTools → Network → WS tab
@@ -257,7 +282,7 @@ cd rust && cargo test
 3. **60 Hz game loop** - maintain this timing
 4. **Delta updates only** - not full state snapshots (except initial connect)
 5. **No persistence** - in-memory only for MVP
-6. **Single map** - no chunk loading in Phase 1
+6. **Full map loaded** - no chunk-based loading yet (Phase 2)
 7. **Type safety** - both languages strongly typed via FlatBuffers
 
 ## Performance Targets

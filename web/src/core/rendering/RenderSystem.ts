@@ -35,12 +35,32 @@ export class RenderSystem {
     // Get all entities to render
     const entities = this.entityQuery(world);
 
+    // Debug: Log entity count
+    if (config.debug && entities.length > 0) {
+      console.log(`🎨 Rendering ${entities.length} entities, player=${playerEntityId}`);
+      for (const eid of entities) {
+        const spriteId = getEntitySpriteId(eid);
+        const isPlayer = playerEntityId !== null && eid === playerEntityId;
+        console.log(`  Entity ${eid}: ${spriteId} ${isPlayer ? '(YOU)' : ''} at (${Position.x[eid]?.toFixed(0)}, ${Position.y[eid]?.toFixed(0)})`);
+      }
+    }
+
     // Separate entities into layers for proper rendering order
     const sortedEntities = this.sortEntitiesByY(entities);
 
     // Render entities
     for (const eid of sortedEntities) {
       this.renderEntity(world, eid, playerEntityId);
+    }
+
+    // Draw fog of war overlay if player exists
+    if (playerEntityId !== null) {
+      const playerX = Position.x[playerEntityId];
+      const playerY = Position.y[playerEntityId];
+      if (playerX !== undefined && playerY !== undefined) {
+        // Add half tile size to center on entity
+        this.renderer.drawFogOfWar(playerX + config.tileSize / 2, playerY + config.tileSize / 2);
+      }
     }
 
     this.renderer.endFrame();
@@ -70,7 +90,11 @@ export class RenderSystem {
 
     let color = this.colors.npc;
     if (isPlayer) {
-      color = this.colors.player;
+      color = this.colors.player; // Blue - this is YOUR player
+    } else if (spriteId?.includes('human') || spriteId?.includes('elf') || spriteId?.includes('dwarf') ||
+               spriteId?.includes('fighter') || spriteId?.includes('rogue') || spriteId?.includes('wizard')) {
+      // Other player characters
+      color = { r: 0.3, g: 1.0, b: 0.3 }; // Green for other players
     } else if (spriteId?.includes('floor')) {
       color = this.colors.floor;
     } else if (spriteId?.includes('wall')) {

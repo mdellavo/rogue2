@@ -16,6 +16,7 @@ type PlayerJoin<'a> = network::PlayerJoin<'a>;
 type Ping<'a> = network::Ping<'a>;
 type ChatMessage<'a> = network::ChatMessage<'a>;
 type InteractDoor<'a> = network::InteractDoor<'a>;
+type RequestChunks<'a> = network::RequestChunks<'a>;
 
 pub async fn handle_message(
     data: &[u8],
@@ -65,6 +66,11 @@ pub async fn handle_message(
         MessageType::InteractDoor => {
             if let Some(interact) = message.payload_as_interact_door() {
                 handle_interact_door(interact, client_id).await;
+            }
+        }
+        MessageType::RequestChunks => {
+            if let Some(request) = message.payload_as_request_chunks() {
+                handle_request_chunks(request, client_id, game_state, clients).await;
             }
         }
         _ => {
@@ -158,12 +164,11 @@ async fn handle_player_join(
 
     info!("Client {} joining as {} {:?} {:?}", client_id, name, species, class);
 
-    // Spawn player at center of map
-    let spawn_x = 1600.0;
-    let spawn_y = 1600.0;
-
+    // Get next spawn point from map
     let entity = {
         let mut state = game_state.write().await;
+        let (spawn_x, spawn_y) = state.get_next_spawn_point();
+        info!("  Spawning at ({}, {})", spawn_x, spawn_y);
         state.add_player(client_id, name, species, class, spawn_x, spawn_y)
     };
 
@@ -177,5 +182,81 @@ async fn handle_player_join(
         info!("📤 Sent initial snapshot to client {}", client_id);
     } else {
         warn!("Client {} not found in clients map after join", client_id);
+    }
+}
+
+async fn handle_request_chunks(
+    request: RequestChunks<'_>,
+    client_id: u64,
+    game_state: SharedGameState,
+    clients: Arc<RwLock<HashMap<u64, ClientConnection>>>,
+) {
+    let chunk_coords = match request.chunk_coords() {
+        Some(coords) => coords,
+        None => {
+            warn!("Client {} requested chunks but provided no coordinates", client_id);
+            return;
+        }
+    };
+
+    debug!("Client {} requesting {} chunks", client_id, chunk_coords.len());
+
+    let state = game_state.read().await;
+    let clients_map = clients.read().await;
+
+    if let Some(client) = clients_map.get(&client_id) {
+        // Build FlatBuffers message with requested chunks
+        let mut builder = flatbuffers::FlatBufferBuilder::new();
+
+        let mut chunk_offsets = Vec::new();
+        for coord in chunk_coords {
+            let cx = coord.x();
+            let cy = coord.y();
+
+            if let Some(chunk) = state.chunk_system.get_chunk(cx, cy) {
+                let tiles = builder.create_vector(&chunk.tiles);
+
+                let mut feature_offsets = Vec::new();
+                for f in &chunk.features {
+                    feature_offsets.push(network::ChunkFeature::create(&mut builder, &network::ChunkFeatureArgs {
+                        tile_x: f.tile_x,
+                        tile_y: f.tile_y,
+                        feature_id: f.feature_id,
+                    }));
+                }
+                let features_vec = builder.create_vector(&feature_offsets);
+
+                let chunk_offset = network::ChunkData::create(&mut builder, &network::ChunkDataArgs {
+                    chunk_x: chunk.chunk_x,
+                    chunk_y: chunk.chunk_y,
+                    tiles: Some(tiles),
+                    features: Some(features_vec),
+                });
+                chunk_offsets.push(chunk_offset);
+            } else {
+                warn!("Client {} requested invalid chunk ({}, {})", client_id, cx, cy);
+            }
+        }
+
+        let chunks_vector = builder.create_vector(&chunk_offsets);
+        let chunks_loaded = network::ChunksLoaded::create(&mut builder, &network::ChunksLoadedArgs {
+            chunks: Some(chunks_vector),
+        });
+
+        let message = network::Message::create(&mut builder, &network::MessageArgs {
+            payload_type: network::MessageType::ChunksLoaded,
+            payload: Some(chunks_loaded.as_union_value()),
+        });
+
+        builder.finish(message, None);
+        let data = builder.finished_data().to_vec();
+
+        if let Err(e) = client.send_message(data) {
+            warn!("Failed to send chunks to client {}: {}", client_id, e);
+        } else {
+            debug!("📤 Sent {} chunks to client {}", chunk_offsets.len(), client_id);
+        }
+    } else {
+        warn!("Client {} not found when trying to send chunks", client_id);
     }
 }

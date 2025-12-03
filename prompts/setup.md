@@ -251,8 +251,43 @@ The game is a roguelike action RPG visually similar to The Legend of Zelda. Play
 
 **Map Types:**
 - **Static maps:** Loaded from JSON files, designed by hand
-- **Procedural maps:** Generated using seeded random generation (seed stored in map metadata)
-- **Persistence:** Procedurally generated maps are generated once per server lifetime, then kept in memory
+- **Procedural maps:** Generated using multi-octave Perlin noise with seeded generation
+- **Persistence:** Procedurally generated maps are generated once at server startup, then kept in memory
+
+**Procedural Generation System:**
+- **Noise Functions:** Uses 4 separate Perlin noise layers
+  - Elevation (3 octaves): Continental features, hills, local bumps
+  - Moisture: Dry vs wet regions
+  - Temperature: Based on latitude and elevation
+  - Detail: Tile variation and feature placement
+- **Biomes:** 9 distinct biomes determined by elevation, moisture, and temperature
+  - Deep Water (< -0.3 elevation)
+  - Shallow Water (-0.3 to -0.1)
+  - Beach (-0.1 to 0.0, near water)
+  - Grassland (0.0 to 0.3, moderate moisture)
+  - Forest (0.0 to 0.3, high moisture > 0.6)
+  - Desert (0.0 to 0.3, low moisture < 0.3)
+  - Hills (0.3 to 0.6)
+  - Mountains (0.6 to 0.8)
+  - Snow Peaks (> 0.8)
+- **Features:** Biome-appropriate objects placed using noise-based clustering
+  - Forest: 15% density (trees, bushes, rocks)
+  - Mountains: 12% density (boulders)
+  - Hills: 8% density (rocks, bushes)
+  - Grassland: 5% density (trees, bushes, rocks)
+  - Desert: 3% density (cacti, rocks, dead trees)
+- **Configuration:** Controlled via environment variables
+  - `USE_PROCEDURAL_MAP=true` - Enable procedural generation (default: false)
+  - `PROCEDURAL_SEED=12345` - Set seed for reproducible worlds (default: random timestamp)
+  - `PROCEDURAL_WIDTH=128` - Map width in tiles (default: 128)
+  - `PROCEDURAL_HEIGHT=128` - Map height in tiles (default: 128)
+- **Music Selection:** Background music automatically chosen based on dominant biome
+  - 30%+ water → "ocean_theme"
+  - 40%+ desert → "desert_theme"
+  - 30%+ mountains → "mountain_theme"
+  - 40%+ forest → "forest_theme"
+  - Default → "overworld_theme"
+- **Performance:** Fast generation (< 100ms for 128x128 tiles, ~300ms for 512x512)
 
 **Map Data Structure:**
 Each map includes the following metadata:
@@ -271,6 +306,24 @@ Each map includes the following metadata:
 - Server responds with new map metadata including `backgroundMusic` ID
 - Client unloads old map chunks and loads new map chunks
 - Client crossfades to new background music track (2 second fade)
+
+**Implementation Details:**
+- **Backend Map Module** (`rust/src/map/`)
+  - `types.rs` - MapData, SpawnPoint, MapObject structures
+  - `loader.rs` - Load from JSON or generate procedurally
+  - `generator.rs` - Main procedural generation orchestrator
+  - `noise.rs` - Multi-octave Perlin noise functions
+  - `biome.rs` - Biome types, rules, and determination logic
+  - `features.rs` - Feature placement (trees, rocks, etc.)
+- **Map Loading Flow:**
+  1. Server startup reads configuration from environment variables
+  2. If `USE_PROCEDURAL_MAP=true`, generates map using seed
+  3. Otherwise, loads static map from `data/maps/overworld_01.json`
+  4. Map stored in GameState and used for spawn points, collision, etc.
+  5. Clients receive map metadata in `GameStateSnapshot` message
+- **Tileset Mapping:** Procedural generator outputs tile IDs that must be mapped to sprite IDs from `sprites.json`
+- **Spawn Points:** Procedural generation automatically identifies safe spawn locations (flat grassland areas)
+- **Determinism:** Same seed always produces identical maps (useful for testing and sharing worlds)
 
 ## Stat & Combat System
 
@@ -1579,6 +1632,8 @@ This is a large project. To ensure we deliver a playable game incrementally, dev
 - ✅ Player connection, join, and disconnect
 - ✅ Smooth continuous movement (WASD controls)
 - ✅ Single static map (loaded from JSON)
+- ✅ Procedural map generation (Perlin noise, 9 biomes, seeded)
+- ✅ Vision/fog of war system (20 tile radius)
 - ✅ WebGL rendering with sprites
 - ✅ Basic melee combat with cooldowns
 - ✅ D&D-inspired stats and damage calculation
@@ -1588,8 +1643,7 @@ This is a large project. To ensure we deliver a playable game incrementally, dev
 - ✅ Server-authoritative state with client prediction
 
 **Out of Scope for Phase 1:**
-- ❌ Chunk loading (use small single map)
-- ❌ Procedural generation (static map only)
+- ❌ Chunk loading (full map loaded at startup)
 - ❌ Map transitions / doors
 - ❌ Equipment system (basic weapon only)
 - ❌ Proximity chat (text chat only)
@@ -1600,11 +1654,11 @@ This is a large project. To ensure we deliver a playable game incrementally, dev
 ## Phase 2: World Exploration
 
 **Add:**
-- Chunk-based map loading
+- Chunk-based map loading (on-demand generation/loading)
 - Multiple static maps with doors/transitions
-- Basic procedural dungeon generation
+- Procedural dungeon generation (using existing noise system)
 - Overworld + dungeon maps
-- Fog of war / vision system
+- Advanced procedural features (rivers, roads, structures)
 
 ## Phase 3: Rich Gameplay
 

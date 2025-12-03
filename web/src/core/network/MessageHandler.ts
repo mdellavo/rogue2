@@ -5,6 +5,8 @@ import * as FBGameStateDelta from '@generated/game/network/game-state-delta';
 import * as FBPong from '@generated/game/network/pong';
 import * as FBMapTransition from '@generated/game/network/map-transition';
 import * as FBSystemMessage from '@generated/game/network/system-message';
+import * as FBChunksLoaded from '@generated/game/network/chunks-loaded';
+import * as FBChunksUnloaded from '@generated/game/network/chunks-unloaded';
 
 export interface MessageHandlerCallbacks {
   onSnapshot: (snapshot: FBGameStateSnapshot.GameStateSnapshot) => void;
@@ -12,6 +14,8 @@ export interface MessageHandlerCallbacks {
   onMapTransition: (transition: FBMapTransition.MapTransition) => void;
   onSystemMessage: (message: FBSystemMessage.SystemMessage) => void;
   onPong: (pong: FBPong.Pong) => void;
+  onChunksLoaded: (chunks: FBChunksLoaded.ChunksLoaded) => void;
+  onChunksUnloaded: (chunks: FBChunksUnloaded.ChunksUnloaded) => void;
 }
 
 export class MessageHandler {
@@ -39,6 +43,14 @@ export class MessageHandler {
 
       case FBMessageType.MessageType.Pong:
         this.handlePong(message);
+        break;
+
+      case FBMessageType.MessageType.ChunksLoaded:
+        this.handleChunksLoaded(message);
+        break;
+
+      case FBMessageType.MessageType.ChunksUnloaded:
+        this.handleChunksUnloaded(message);
         break;
 
       default:
@@ -116,5 +128,27 @@ export class MessageHandler {
 
     // Silent - pongs are frequent
     this.callbacks.onPong(pong);
+  }
+
+  private handleChunksLoaded(message: FBMessage.Message): void {
+    const chunksLoaded = message.payload(new FBChunksLoaded.ChunksLoaded());
+    if (!chunksLoaded) {
+      console.error('Failed to parse ChunksLoaded');
+      return;
+    }
+
+    console.log('📦 Received', chunksLoaded.chunksLength(), 'new chunks');
+    this.callbacks.onChunksLoaded(chunksLoaded);
+  }
+
+  private handleChunksUnloaded(message: FBMessage.Message): void {
+    const chunksUnloaded = message.payload(new FBChunksUnloaded.ChunksUnloaded());
+    if (!chunksUnloaded) {
+      console.error('Failed to parse ChunksUnloaded');
+      return;
+    }
+
+    console.log('🗑️  Unloading', chunksUnloaded.chunkCoordsLength(), 'chunks');
+    this.callbacks.onChunksUnloaded(chunksUnloaded);
   }
 }

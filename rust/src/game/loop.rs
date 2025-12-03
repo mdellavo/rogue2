@@ -59,19 +59,22 @@ impl GameLoop {
         // 2. Update movement system (apply velocity to position)
         self.update_movement(&mut state);
 
-        // 3. Update AI system (future)
+        // 3. Check for chunk updates (players moving between chunks)
+        self.update_player_chunks(&mut state).await;
+
+        // 4. Update AI system (future)
         // self.update_ai(&mut state);
 
-        // 4. Update cooldowns and timers (future)
+        // 5. Update cooldowns and timers (future)
         // self.update_cooldowns(&mut state);
 
-        // 5. Collision detection (future)
+        // 6. Collision detection (future)
         // self.detect_collisions(&mut state);
 
-        // 6. Combat system (future)
+        // 7. Combat system (future)
         // self.update_combat(&mut state);
 
-        // 7. Generate delta updates
+        // 8. Generate delta updates
         // Use raw pointers to split the borrow since we know delta_tracker and world don't overlap
         let changes = unsafe {
             let world_ptr = &state.world as *const hecs::World;
@@ -81,7 +84,7 @@ impl GameLoop {
         state.delta_sequence = state.delta_sequence.wrapping_add(1);
         let sequence = state.delta_sequence;
 
-        // 8. Broadcast updates to clients
+        // 9. Broadcast updates to clients
         let clients = self.clients.read().await;
         sync::broadcast_delta(&clients, &state, &changes, sequence).await;
 
@@ -132,6 +135,103 @@ impl GameLoop {
 
             pos.x = pos.x.clamp(MAP_MIN, MAP_MAX);
             pos.y = pos.y.clamp(MAP_MIN, MAP_MAX);
+        }
+    }
+
+    async fn update_player_chunks(&self, state: &mut super::state::GameState) {
+        use crate::generated::messages_generated::game::network;
+
+        let clients = self.clients.read().await;
+
+        // Check each player for chunk updates
+        let player_ids: Vec<u64> = state.players.keys().copied().collect();
+        for player_id in player_ids {
+            let chunk_update = state.update_player_chunks(player_id);
+
+            // Only send messages if there are changes
+            if !chunk_update.to_load.is_empty() || !chunk_update.to_unload.is_empty() {
+                if let Some(client) = clients.get(&player_id) {
+                    // Send ChunksLoaded for new chunks
+                    if !chunk_update.to_load.is_empty() {
+                        let mut builder = flatbuffers::FlatBufferBuilder::new();
+
+                        let mut chunk_offsets = Vec::new();
+                        for (cx, cy) in &chunk_update.to_load {
+                            if let Some(chunk) = state.chunk_system.get_chunk(*cx, *cy) {
+                                let tiles = builder.create_vector(&chunk.tiles);
+
+                                let mut feature_offsets = Vec::new();
+                                for f in &chunk.features {
+                                    feature_offsets.push(network::ChunkFeature::create(&mut builder, &network::ChunkFeatureArgs {
+                                        tile_x: f.tile_x,
+                                        tile_y: f.tile_y,
+                                        feature_id: f.feature_id,
+                                    }));
+                                }
+                                let features_vec = builder.create_vector(&feature_offsets);
+
+                                let chunk_offset = network::ChunkData::create(&mut builder, &network::ChunkDataArgs {
+                                    chunk_x: chunk.chunk_x,
+                                    chunk_y: chunk.chunk_y,
+                                    tiles: Some(tiles),
+                                    features: Some(features_vec),
+                                });
+                                chunk_offsets.push(chunk_offset);
+                            }
+                        }
+
+                        let chunks_vector = builder.create_vector(&chunk_offsets);
+                        let chunks_loaded = network::ChunksLoaded::create(&mut builder, &network::ChunksLoadedArgs {
+                            chunks: Some(chunks_vector),
+                        });
+
+                        let message = network::Message::create(&mut builder, &network::MessageArgs {
+                            payload_type: network::MessageType::ChunksLoaded,
+                            payload: Some(chunks_loaded.as_union_value()),
+                        });
+
+                        builder.finish(message, None);
+                        let data = builder.finished_data().to_vec();
+
+                        if let Err(e) = client.send_message(data) {
+                            debug!("Failed to send ChunksLoaded to client {}: {}", player_id, e);
+                        } else {
+                            debug!("📤 Sent {} new chunks to client {}", chunk_update.to_load.len(), player_id);
+                        }
+                    }
+
+                    // Send ChunksUnloaded for chunks to remove
+                    if !chunk_update.to_unload.is_empty() {
+                        let mut builder = flatbuffers::FlatBufferBuilder::new();
+
+                        let chunk_coords: Vec<_> = chunk_update.to_unload.iter().map(|(cx, cy)| {
+                            network::ChunkCoord::create(&mut builder, &network::ChunkCoordArgs {
+                                x: *cx,
+                                y: *cy,
+                            })
+                        }).collect();
+
+                        let coords_vector = builder.create_vector(&chunk_coords);
+                        let chunks_unloaded = network::ChunksUnloaded::create(&mut builder, &network::ChunksUnloadedArgs {
+                            chunk_coords: Some(coords_vector),
+                        });
+
+                        let message = network::Message::create(&mut builder, &network::MessageArgs {
+                            payload_type: network::MessageType::ChunksUnloaded,
+                            payload: Some(chunks_unloaded.as_union_value()),
+                        });
+
+                        builder.finish(message, None);
+                        let data = builder.finished_data().to_vec();
+
+                        if let Err(e) = client.send_message(data) {
+                            debug!("Failed to send ChunksUnloaded to client {}: {}", player_id, e);
+                        } else {
+                            debug!("📤 Sent {} unload requests to client {}", chunk_update.to_unload.len(), player_id);
+                        }
+                    }
+                }
+            }
         }
     }
 }

@@ -2,6 +2,7 @@ use game_server::config::Config;
 use game_server::game::state::GameState;
 use game_server::game::r#loop::GameLoop;
 use game_server::network;
+use game_server::map::loader;
 
 use log::{info, error};
 use std::sync::Arc;
@@ -19,8 +20,24 @@ async fn main() -> anyhow::Result<()> {
     info!("   Max players: {}", config.max_players);
     info!("   Tick rate: {} Hz", config.tick_rate);
 
+    // Load or generate map based on configuration
+    let map = if config.map.use_procedural {
+        let seed = config.map.procedural_seed.unwrap_or_else(|| {
+            use std::time::{SystemTime, UNIX_EPOCH};
+            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+            now.as_secs() as u32
+        });
+        info!("🎲 Using procedural generation:");
+        info!("   Seed: {}", seed);
+        info!("   Size: {}x{}", config.map.procedural_width, config.map.procedural_height);
+        loader::generate_procedural_map(seed, config.map.procedural_width, config.map.procedural_height)?
+    } else {
+        info!("📂 Loading static map from file");
+        loader::load_default_map()?
+    };
+
     // Initialize shared game state
-    let game_state = Arc::new(RwLock::new(GameState::new()));
+    let game_state = Arc::new(RwLock::new(GameState::new(map)));
     info!("✅ Game state initialized");
 
     // Initialize WebSocket server

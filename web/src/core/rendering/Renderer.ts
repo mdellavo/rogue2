@@ -25,6 +25,9 @@ export class Renderer {
   private colors: number[] = [];
   private maxBatchSize: number = 10000; // Maximum sprites per batch
 
+  // Vision/fog of war
+  private readonly visionRadiusTiles: number = 20; // Vision range in tiles
+
   constructor(canvas: HTMLCanvasElement, camera: Camera) {
     this.canvas = canvas;
     this.camera = camera;
@@ -161,6 +164,59 @@ export class Renderer {
     // Clear batch arrays
     this.positions = [];
     this.colors = [];
+
+    // Draw checkerboard background
+    this.drawCheckerboard(viewport);
+  }
+
+  /**
+   * Draw a checkerboard pattern as the background
+   */
+  private drawCheckerboard(viewport: {
+    left: number;
+    right: number;
+    top: number;
+    bottom: number;
+  }): void {
+    const tileSize = config.tileSize;
+
+    // Calculate the tile boundaries visible in the viewport
+    const startTileX = Math.floor(viewport.left / tileSize);
+    const endTileX = Math.ceil(viewport.right / tileSize);
+    const startTileY = Math.floor(viewport.top / tileSize);
+    const endTileY = Math.ceil(viewport.bottom / tileSize);
+
+    // Checkerboard colors
+    const lightColor = { r: 0.25, g: 0.25, b: 0.3, a: 1.0 }; // Light gray-blue
+    const darkColor = { r: 0.15, g: 0.15, b: 0.2, a: 1.0 }; // Dark gray-blue
+
+    // Draw each tile
+    for (let tileY = startTileY; tileY < endTileY; tileY++) {
+      for (let tileX = startTileX; tileX < endTileX; tileX++) {
+        // Determine checkerboard color based on tile coordinates
+        const isLight = (tileX + tileY) % 2 === 0;
+        const color = isLight ? lightColor : darkColor;
+
+        // Calculate world position
+        const worldX = tileX * tileSize;
+        const worldY = tileY * tileSize;
+
+        // Draw tile
+        this.drawRect(
+          worldX,
+          worldY,
+          tileSize,
+          tileSize,
+          color.r,
+          color.g,
+          color.b,
+          color.a
+        );
+      }
+    }
+
+    // Flush checkerboard to GPU before drawing entities
+    this.flush();
   }
 
   /**
@@ -226,6 +282,85 @@ export class Renderer {
     if (this.positions.length >= this.maxBatchSize * 12) {
       this.flush();
     }
+  }
+
+  /**
+   * Draw fog of war overlay (darkens areas outside vision radius)
+   * Should be called after all entities are rendered
+   */
+  public drawFogOfWar(playerX: number, playerY: number): void {
+    const viewport = this.camera.getViewport();
+    const fogColor = { r: 0.0, g: 0.0, b: 0.0, a: 0.7 }; // Dark semi-transparent overlay
+
+    // Calculate vision radius in pixels
+    const visionRadiusPixels = this.visionRadiusTiles * config.tileSize;
+
+    // Draw fog as rectangles covering areas outside the vision circle
+
+    // Draw fog as a full-screen quad with transparency based on distance from player
+    // We'll use multiple concentric rectangles to create a gradient effect
+
+    // For now, draw a simple overlay outside the vision circle
+    // We'll draw four rectangles covering areas outside the circle
+
+    // Top rectangle (above vision circle)
+    if (viewport.top < playerY - visionRadiusPixels) {
+      this.drawRect(
+        viewport.left,
+        viewport.top,
+        viewport.right - viewport.left,
+        (playerY - visionRadiusPixels) - viewport.top,
+        fogColor.r,
+        fogColor.g,
+        fogColor.b,
+        fogColor.a
+      );
+    }
+
+    // Bottom rectangle (below vision circle)
+    if (viewport.bottom > playerY + visionRadiusPixels) {
+      this.drawRect(
+        viewport.left,
+        playerY + visionRadiusPixels,
+        viewport.right - viewport.left,
+        viewport.bottom - (playerY + visionRadiusPixels),
+        fogColor.r,
+        fogColor.g,
+        fogColor.b,
+        fogColor.a
+      );
+    }
+
+    // Left rectangle (left of vision circle)
+    if (viewport.left < playerX - visionRadiusPixels) {
+      this.drawRect(
+        viewport.left,
+        Math.max(viewport.top, playerY - visionRadiusPixels),
+        (playerX - visionRadiusPixels) - viewport.left,
+        Math.min(viewport.bottom, playerY + visionRadiusPixels) - Math.max(viewport.top, playerY - visionRadiusPixels),
+        fogColor.r,
+        fogColor.g,
+        fogColor.b,
+        fogColor.a
+      );
+    }
+
+    // Right rectangle (right of vision circle)
+    if (viewport.right > playerX + visionRadiusPixels) {
+      this.drawRect(
+        playerX + visionRadiusPixels,
+        Math.max(viewport.top, playerY - visionRadiusPixels),
+        viewport.right - (playerX + visionRadiusPixels),
+        Math.min(viewport.bottom, playerY + visionRadiusPixels) - Math.max(viewport.top, playerY - visionRadiusPixels),
+        fogColor.r,
+        fogColor.g,
+        fogColor.b,
+        fogColor.a
+      );
+    }
+
+    // Flush fog to GPU
+    this.flush();
   }
 
   /**
