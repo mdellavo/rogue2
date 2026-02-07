@@ -4,7 +4,7 @@ import { WebSocketClient, ConnectionState } from './core/network/WebSocketClient
 import { MessageHandler } from './core/network/MessageHandler';
 import { createPlayerJoinMessage } from './core/network/messages';
 import { GameWorld } from './core/ecs/world';
-import { Camera, Renderer, RenderSystem } from './core/rendering';
+import { Camera, RendererTextured, RenderSystemTextured, TilesetManager } from './core/rendering';
 import { InputManager, InputSystem } from './core/input';
 import { ChunkManager } from './core/map/ChunkManager';
 import * as FBSpecies from '@generated/game/network/species';
@@ -78,22 +78,26 @@ const gameContainerDiv = document.querySelector<HTMLDivElement>('#game-container
 const gameInfoDiv = document.querySelector<HTMLDivElement>('#game-info')!;
 const canvas = document.querySelector<HTMLCanvasElement>('#game-canvas')!;
 
-// Create game world and WebSocket client
+// Create game world and managers
 const gameWorld = new GameWorld();
 const chunkManager = new ChunkManager();
+const tilesetManager = new TilesetManager();
 let wsClient: WebSocketClient | null = null;
 let messageHandler: MessageHandler | null = null;
 let playerEntityId: number | null = null;
 
 // Rendering system
 let camera: Camera | null = null;
-let renderer: Renderer | null = null;
-let renderSystem: RenderSystem | null = null;
+let renderer: RendererTextured | null = null;
+let renderSystem: RenderSystemTextured | null = null;
 let gameLoopRunning: boolean = false;
 
 // Input system
 let inputManager: InputManager | null = null;
 let inputSystem: InputSystem | null = null;
+
+// Loading state
+let isLoadingTilesets = false;
 
 // Update status message
 function updateStatus(message: string, type: 'info' | 'error' | 'success' = 'info'): void {
@@ -105,6 +109,52 @@ function updateStatus(message: string, type: 'info' | 'error' | 'success' = 'inf
 function showGame(): void {
   characterCreationDiv.style.display = 'none';
   gameContainerDiv.style.display = 'block';
+}
+
+// Load tilesets and initialize rendering
+async function loadTilesetsAndInitialize(): Promise<void> {
+  if (isLoadingTilesets) {
+    return; // Already loading
+  }
+
+  isLoadingTilesets = true;
+  updateStatus('Loading game assets...', 'info');
+
+  try {
+    // Load default tileset
+    console.log(`🎨 Loading tileset "${config.defaultTileset}"...`);
+    await tilesetManager.loadTileset(config.defaultTileset);
+    console.log('✅ Tileset loaded successfully');
+
+    // Initialize renderer with tileset support
+    if (!camera) {
+      camera = new Camera();
+      renderer = new RendererTextured(canvas, camera, tilesetManager);
+      renderSystem = new RenderSystemTextured(renderer, tilesetManager, chunkManager);
+      console.log('🎨 Textured renderer initialized');
+    }
+
+    // Initialize input system
+    if (!inputManager && wsClient) {
+      inputManager = new InputManager();
+      inputSystem = new InputSystem(inputManager, wsClient, camera, canvas);
+      inputSystem.enable();
+      console.log('🎮 Input system initialized');
+    }
+
+    // Start game loop
+    if (!gameLoopRunning) {
+      gameLoopRunning = true;
+      startGameLoop();
+      console.log('🔄 Game loop started');
+    }
+
+    // Show game UI
+    showGame();
+    updateStatus('Game started!', 'success');
+  } finally {
+    isLoadingTilesets = false;
+  }
 }
 
 // Handle GameStateSnapshot
@@ -174,32 +224,11 @@ function handleGameStateSnapshot(snapshot: FBGameStateSnapshot.GameStateSnapshot
   console.log(`✅ ECS world initialized with ${gameWorld.getAllEntities().length} entities`);
   console.log(`👤 Player client entity ID: ${gameWorld.getPlayerEntityId()}`);
 
-  // Initialize renderer
-  if (!camera) {
-    camera = new Camera();
-    renderer = new Renderer(canvas, camera);
-    renderSystem = new RenderSystem(renderer);
-    console.log('🎨 Renderer initialized');
-  }
-
-  // Initialize input system
-  if (!inputManager && wsClient) {
-    inputManager = new InputManager();
-    inputSystem = new InputSystem(inputManager, wsClient, camera, canvas);
-    inputSystem.enable();
-    console.log('🎮 Input system initialized');
-  }
-
-  // Start game loop
-  if (!gameLoopRunning) {
-    gameLoopRunning = true;
-    startGameLoop();
-    console.log('🔄 Game loop started');
-  }
-
-  // Show game UI
-  showGame();
-  updateStatus('Game started!', 'success');
+  // Load tilesets asynchronously
+  loadTilesetsAndInitialize().catch((error) => {
+    console.error('Failed to load tilesets:', error);
+    updateStatus('Failed to load game assets', 'error');
+  });
 }
 
 // Handle GameStateDelta
@@ -251,22 +280,34 @@ function handlePong(_pong: FBPong.Pong): void {
 // Handle ChunksLoaded
 function handleChunksLoaded(chunksLoaded: FBChunksLoaded.ChunksLoaded): void {
   const chunks: any[] = [];
+  const chunkCoords: string[] = [];
+
   for (let i = 0; i < chunksLoaded.chunksLength(); i++) {
     const chunk = chunksLoaded.chunks(i);
-    if (chunk) chunks.push(chunk);
+    if (chunk) {
+      chunks.push(chunk);
+      chunkCoords.push(`(${chunk.chunkX()},${chunk.chunkY()})`);
+    }
   }
+
+  console.log(`📦 Loading ${chunks.length} map chunks:`, chunkCoords.join(', '));
   chunkManager.loadChunks(chunks);
 }
 
 // Handle ChunksUnloaded
 function handleChunksUnloaded(chunksUnloaded: FBChunksUnloaded.ChunksUnloaded): void {
   const coords: Array<{ x: number; y: number }> = [];
+  const coordStrings: string[] = [];
+
   for (let i = 0; i < chunksUnloaded.chunkCoordsLength(); i++) {
     const coord = chunksUnloaded.chunkCoords(i);
     if (coord) {
       coords.push({ x: coord.x(), y: coord.y() });
+      coordStrings.push(`(${coord.x()},${coord.y()})`);
     }
   }
+
+  console.log(`🗑️  Unloading ${coords.length} map chunks:`, coordStrings.join(', '));
   chunkManager.unloadChunks(coords);
 }
 

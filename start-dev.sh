@@ -50,11 +50,12 @@ tmux select-layout -t "$SESSION_NAME:0" even-vertical
 # Run backend server in the top pane (pane 0)
 tmux send-keys -t "$SESSION_NAME:0.0" "cd '$SCRIPT_DIR/rust'" C-m
 tmux send-keys -t "$SESSION_NAME:0.0" "echo '🦀 Starting Rust backend server...'" C-m
-tmux send-keys -t "$SESSION_NAME:0.0" "RUST_LOG=info cargo run" C-m
+tmux send-keys -t "$SESSION_NAME:0.0" "USE_PROCEDURAL_MAP=true RUST_LOG=info cargo run" C-m
 
 # Run frontend dev server in the bottom pane (pane 1)
 tmux send-keys -t "$SESSION_NAME:0.1" "cd '$SCRIPT_DIR/web'" C-m
 tmux send-keys -t "$SESSION_NAME:0.1" "echo '⚛️  Starting Vite frontend dev server...'" C-m
+tmux send-keys -t "$SESSION_NAME:0.1" "nvm use stable" C-m
 tmux send-keys -t "$SESSION_NAME:0.1" "npm run dev" C-m
 
 # Select the top pane (backend) as the active pane
