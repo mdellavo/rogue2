@@ -4,6 +4,7 @@ import { WebSocketClient, ConnectionState } from './core/network/WebSocketClient
 import { MessageHandler } from './core/network/MessageHandler';
 import { createPlayerJoinMessage } from './core/network/messages';
 import { GameWorld } from './core/ecs/world';
+import { Position } from './core/ecs/components';
 import { Camera, Renderer, RenderSystem } from './core/rendering';
 import { InputManager, InputSystem } from './core/input';
 import { ChunkManager } from './core/map/ChunkManager';
@@ -147,6 +148,7 @@ function handleGameStateSnapshot(snapshot: FBGameStateSnapshot.GameStateSnapshot
     <div class="info-panel">
       <h3>${snapshot.mapName()}</h3>
       <p>Player Entity ID: ${playerEntityId}</p>
+      <p id="player-position">Position: (0, 0)</p>
       <p>Entities in view: ${snapshot.entitiesLength()}</p>
       <p>Chunks loaded: ${chunks.length}</p>
       <p>Music: ${snapshot.backgroundMusic()}</p>
@@ -273,6 +275,19 @@ function handleChunksUnloaded(chunksUnloaded: FBChunksUnloaded.ChunksUnloaded): 
 // Game loop
 let lastFrameTime = performance.now();
 
+// Update player position display
+function updatePlayerPositionDisplay(): void {
+  const playerEid = gameWorld.getPlayerEntityId();
+  if (playerEid !== null) {
+    const positionElement = document.querySelector<HTMLParagraphElement>('#player-position');
+    if (positionElement) {
+      const x = Position.x[playerEid];
+      const y = Position.y[playerEid];
+      positionElement.textContent = `Position: (${x.toFixed(1)}, ${y.toFixed(1)})`;
+    }
+  }
+}
+
 function startGameLoop(): void {
   function gameLoop(currentTime: number): void {
     if (!gameLoopRunning) {
@@ -293,6 +308,9 @@ function startGameLoop(): void {
       camera.update(deltaTime);
       renderSystem.updateCamera(gameWorld.getPlayerEntityId());
     }
+
+    // Update player position display
+    updatePlayerPositionDisplay();
 
     // Render the frame
     if (renderSystem) {
